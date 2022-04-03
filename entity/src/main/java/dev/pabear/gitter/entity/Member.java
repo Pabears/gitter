@@ -9,7 +9,22 @@ public class Member {
   private int port;
   private int incarnation;
 
-  public String IpPortString() {
+  public static Member copyData(Member old) {
+    Member member = new Member();
+    member.setStatus(old.getStatus());
+    member.setPort(old.getPort());
+    member.setIp(old.getIp());
+    member.setIncarnation(old.getIncarnation());
+    return member;
+  }
+
+  public boolean equals(Member member) {
+    return this.ipPortString().equals(member.ipPortString())
+        && member.getStatus() == this.getStatus()
+        && member.getIncarnation() == this.getIncarnation();
+  }
+
+  public String ipPortString() {
     return getIp() + ":" + getPort();
   }
 }

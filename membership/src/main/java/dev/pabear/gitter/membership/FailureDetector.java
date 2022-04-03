@@ -20,10 +20,16 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Stack;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class FailureDetector extends AbstractVerticle {
+  public static final String TICK = "TICK";
   private final int pingCount;
   private final int pingTimeout;
   private final int pingReqMemberCount;
@@ -31,13 +37,15 @@ public class FailureDetector extends AbstractVerticle {
   private final int suspectPeriodCount;
   private final int protocolPeriod;
   private final int port;
-  private int incarnation = 0;
+  private final Metric metric;
+  private AtomicInteger incarnation = new AtomicInteger();
+  private AtomicLong periodCount = new AtomicLong();
 
-  private String myIp = Inet4Address.getLocalHost().toString();
-  private HashMap<String, Member> ipPortMemberMap = new HashMap<>();
+  private String myIp = Inet4Address.getLocalHost().getHostAddress();
+  private Map<String, Member> ipPortMemberMap = new HashMap<>();
   private Stack<Member> memberPingOrder = new Stack<>();
-  private HashMap<String, Member> ipPortUpdatedMembers = new HashMap<>();
-  private HashMap<String, Member> ipPortUpdatedMembersForSend = new HashMap<>();
+  private Map<String, Member> ipPortUpdatedMembers = new HashMap<>();
+  private Map<String, Member> ipPortUpdatedMembersForSend = new HashMap<>();
 
   private long periodId;
   private Map<String, Msg> idMsgMap = new HashMap<>();
@@ -46,7 +54,8 @@ public class FailureDetector extends AbstractVerticle {
   private Map<String, Long> ipPortSuspectTimerMap = new HashMap<>();
   private Dissemination dissemination;
 
-  FailureDetector(Config config, Dissemination dissemination) throws UnknownHostException {
+  FailureDetector(Config config, Dissemination dissemination, Metric metric)
+      throws UnknownHostException {
     this.pingCount = Integer.parseInt(config.getConfigs().get(ConfigKeys.EACH_TURN_PING_COUNT));
     this.pingTimeout = Integer.parseInt(config.getConfigs().get(ConfigKeys.PING_TIMEOUT));
     this.pingReqMemberCount =
@@ -57,8 +66,9 @@ public class FailureDetector extends AbstractVerticle {
     this.protocolPeriod = Integer.parseInt(config.getConfigs().get(ConfigKeys.PROTOCOL_PERIOD));
     this.port = Integer.parseInt(config.getConfigs().get(ConfigKeys.PORT));
     this.dissemination = dissemination;
-    if (config.getSource() != null) {
-      ipPortMemberMap.put(config.getSource().IpPortString(), config.getSource());
+    this.metric = metric;
+    if (config.getSource() != null && !config.getSource().ipPortString().equals(myIpPortString())) {
+      ipPortMemberMap.put(config.getSource().ipPortString(), config.getSource());
     }
   }
 
@@ -69,15 +79,18 @@ public class FailureDetector extends AbstractVerticle {
             protocolPeriod,
             periodId -> {
               this.periodId = periodId;
-              this.ipPortUpdatedMembersForSend = this.ipPortUpdatedMembers;
-              this.ipPortUpdatedMembers = new HashMap<>();
+              clearMemberUpdateForSend();
+              metric.setUpdateMemberCount(ipPortUpdatedMembersForSend.size());
+              getVertx().eventBus().send(TICK, periodCount.getAndIncrement());
               for (int i = 0; i < pingCount; i++) {
                 Member aPingTarget = getAPingTarget();
+                //                log.info("ping target: {}.", Json.encode(aPingTarget));
                 if (aPingTarget == null) {
                   return;
                 }
                 ping(aPingTarget);
               }
+              dissemination.clearSendBox();
             });
     getVertx()
         .eventBus()
@@ -85,9 +98,26 @@ public class FailureDetector extends AbstractVerticle {
             RECEIVE_TOPIC, msg -> processMsg(Json.decodeValue((String) msg.body(), Msg.class)));
   }
 
+  private void clearMemberUpdateForSend() {
+    Map<String, Member> sent = this.ipPortUpdatedMembersForSend;
+    this.ipPortUpdatedMembersForSend = this.ipPortUpdatedMembers;
+    this.ipPortUpdatedMembers = new HashMap<>();
+    Map<String, Member> forSend = new HashMap<>();
+    for (Entry<String, Member> en : ipPortUpdatedMembersForSend.entrySet()) {
+      if (sent.containsKey(en.getKey())) {
+        Member win = compareMember(en.getValue(), sent.get(en.getKey()));
+        if (!win.equals(sent.get(en.getKey()))) {
+          forSend.put(en.getKey(), en.getValue());
+        }
+      }
+    }
+    this.ipPortUpdatedMembersForSend = forSend;
+  }
+
   private Member getAPingTarget() {
 
     if (memberPingOrder.empty()) {
+      ipPortMemberMap.remove(myIpPortString());
       List<Member> membersTemp = new LinkedList<>(ipPortMemberMap.values());
       Collections.shuffle(membersTemp);
       memberPingOrder.addAll(membersTemp);
@@ -131,8 +161,6 @@ public class FailureDetector extends AbstractVerticle {
     Msg originMsg = idMsgMap.get(msg.getId());
     setMemberAliveByIpPort(originMsg.targetIpPortString());
 
-    dissemination.clearSendBox();
-
     if (originMsg.getType() == MsgType.PING_REQ) {
       // from me
       clearPingRequestTimer(msg.getPingReqId());
@@ -146,14 +174,14 @@ public class FailureDetector extends AbstractVerticle {
     msg.setType(type);
     msg.setTarget(target);
     msg.setId(id);
-    msg.setPayloads(dissemination.getPayloadFromSendBox());
+    msg.setPayloads(new ArrayList<>(dissemination.getPayloadFromSendBox()));
     msg.setMembers(new ArrayList<>(ipPortUpdatedMembersForSend.values()));
     msg.setPingReqId(originId);
     Member member = new Member();
     member.setIp(myIp);
     member.setPort(port);
     member.setStatus(MemberStatus.ALIVE);
-    member.setIncarnation(incarnation);
+    member.setIncarnation(incarnation.get());
     msg.setFrom(member);
     return msg;
   }
@@ -202,8 +230,8 @@ public class FailureDetector extends AbstractVerticle {
         vertx.setTimer(
             pingReqTimeout,
             timerId -> {
-              setSuspectTimer(target.IpPortString());
-              Member member = ipPortMemberMap.get(target.IpPortString());
+              setSuspectTimer(target.ipPortString());
+              Member member = ipPortMemberMap.get(target.ipPortString());
               if (member == null) {
                 return;
               }
@@ -245,52 +273,67 @@ public class FailureDetector extends AbstractVerticle {
   }
 
   private void updateMember(Member member) {
-    Member oldData = ipPortUpdatedMembers.get(member.IpPortString());
-    if (oldData == null) {
-      if (member.getStatus() == MemberStatus.ALIVE) {
-        ipPortUpdatedMembers.put(member.IpPortString(), member);
-        ipPortMemberMap.put(member.IpPortString(),member);
+    if (isMe(member)) {
+      if (member.getStatus() != MemberStatus.ALIVE || member.getIncarnation() < incarnation.get()) {
+        Member me = new Member();
+        me.setPort(port);
+        me.setIp(myIp);
+        me.setIncarnation(incarnation.incrementAndGet());
+        me.setStatus(MemberStatus.ALIVE);
+        ipPortUpdatedMembers.put(myIpPortString(), me);
       }
-    } else {
-      if (oldData.getStatus() == MemberStatus.FAULTY) {
-        return;
-      }
-      ipPortMemberMap.put(member.IpPortString(),member);
+      return;
+    }
 
-      MemberStatus status = member.getStatus();
-      if (status == MemberStatus.FAULTY) {
-        ipPortUpdatedMembers.put(member.IpPortString(), member);
-        ipPortMemberMap.remove(member.IpPortString());
-      } else if (status == MemberStatus.SUSPECT) {
-        if (oldData.getStatus() == MemberStatus.SUSPECT
-            && member.getIncarnation() > oldData.getIncarnation()) {
-          ipPortUpdatedMembers.put(member.IpPortString(), member);
-        } else if (oldData.getStatus() == MemberStatus.ALIVE
-            && member.getIncarnation() >= oldData.getIncarnation()) {
-          ipPortUpdatedMembers.put(member.IpPortString(), member);
-        }
-      } else if (status == MemberStatus.ALIVE) {
-        if (oldData.getStatus() == MemberStatus.SUSPECT
-            && member.getIncarnation() > oldData.getIncarnation()) {
-          ipPortUpdatedMembers.put(member.IpPortString(), member);
-        } else if (oldData.getStatus() == MemberStatus.ALIVE
-            && member.getIncarnation() > oldData.getIncarnation()) {
-          ipPortUpdatedMembers.put(member.IpPortString(), member);
-        }
+    Member localData = ipPortMemberMap.get(member.ipPortString());
+    Member comparedMember = compareMember(member, localData);
+    ipPortUpdatedMembers.put(comparedMember.ipPortString(), comparedMember);
+    if (comparedMember != localData) {
+      if (member.getStatus() != MemberStatus.FAULTY) {
+        ipPortMemberMap.put(member.ipPortString(), member);
       }
     }
   }
 
-  private boolean notMe(Member member) {
-    return true;
+  private Member compareMember(Member m1, Member m2) {
+
+    if (m1 == null || m2 == null) {
+      if (m1 == null) {
+        return m2;
+      } else {
+        return m1;
+      }
+    }
+
+    if (m1.getIncarnation() == m2.getIncarnation()) {
+      if (m1.getStatus().getValue() >= m2.getStatus().getValue()) {
+        return m1;
+      } else {
+        return m2;
+      }
+    } else if (m1.getIncarnation() > m2.getIncarnation()) {
+      return m1;
+    } else {
+      return m2;
+    }
+  }
+
+  private boolean isMe(Member member) {
+    return myIpPortString().equals(member.ipPortString());
+  }
+
+  public String myIpPortString() {
+    return this.myIp + ":" + port;
   }
 
   private void sendMsg(Msg msg) {
+    metric.countSendMsg();
     idMsgMap.put(msg.getId(), msg);
     getVertx().eventBus().send(SEND_TOPIC, Json.encode(msg));
   }
 
   private void processMsg(Msg msg) {
+    metric.countReceiveMsg();
     processMsgInfo(msg);
     if (msg.getType() == MsgType.PING) {
       onPing(msg);

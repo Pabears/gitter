@@ -14,10 +14,10 @@ public class Msg {
   private List<Payload> payloads;
 
   public String targetIpPortString() {
-    return target.IpPortString();
+    return target.ipPortString();
   }
 
   public String fromIpPortString() {
-    return from.IpPortString();
+    return from.ipPortString();
   }
 }

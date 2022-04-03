@@ -13,13 +13,16 @@ import lombok.extern.slf4j.Slf4j;
 public class Gitter {
   private Dissemination dissemination;
   private FailureDetector failureDetector;
+  private Metric metric;
 
   public Gitter(Config config) throws UnknownHostException {
     log.info("start config: {}", Json.encode(config));
     this.dissemination = new Dissemination(config);
-    this.failureDetector = new FailureDetector(config, dissemination);
+    this.metric = new Metric();
+    this.failureDetector = new FailureDetector(config, dissemination, metric);
     Vertx vertx = Vertx.vertx();
     vertx.deployVerticle(failureDetector);
+    vertx.deployVerticle(metric);
     Net net = new Net(config);
     vertx.deployVerticle(net);
   }
@@ -34,5 +37,9 @@ public class Gitter {
 
   public List<Payload> getReceives() {
     return dissemination.getReceived();
+  }
+
+  public String myIpPortString() {
+    return failureDetector.myIpPortString();
   }
 }
