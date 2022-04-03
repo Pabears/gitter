@@ -292,6 +292,10 @@ public class FailureDetector extends AbstractVerticle {
       if (member.getStatus() != MemberStatus.FAULTY) {
         ipPortMemberMap.put(member.ipPortString(), member);
       }
+    } else {
+      if (comparedMember.getStatus() == MemberStatus.FAULTY) {
+        ipPortMemberMap.remove(localData.ipPortString());
+      }
     }
   }
 

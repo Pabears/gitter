@@ -19,22 +19,24 @@ public class Dissemination {
   }
 
   public void addToSendBox(Payload payload) {
-    synchronized (payload) {
+    synchronized (this) {
       this.sendBox.add(payload);
     }
   }
 
   public List<Payload> getPayloadFromSendBox() {
-    if (sendBox.size() == 0) {
-      return new ArrayList<>();
+    synchronized (this) {
+      if (sendBox.size() == 0) {
+        return new ArrayList<>();
+      }
+      int count = Math.min(sendBox.size(), payloadCountLimit);
+      lastIndex.set(count - 1);
+      return sendBox.subList(0, count - 1);
     }
-    int count = Math.min(sendBox.size(), payloadCountLimit);
-    lastIndex.set(count);
-    return sendBox.subList(0, count - 1);
   }
 
   public void clearSendBox() {
-    synchronized (sendBox) {
+    synchronized (this) {
       if (sendBox.isEmpty()) {
         return;
       }

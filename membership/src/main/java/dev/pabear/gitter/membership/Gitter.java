@@ -14,13 +14,14 @@ public class Gitter {
   private Dissemination dissemination;
   private FailureDetector failureDetector;
   private Metric metric;
+  private Vertx vertx;
 
   public Gitter(Config config) throws UnknownHostException {
     log.info("start config: {}", Json.encode(config));
     this.dissemination = new Dissemination(config);
     this.metric = new Metric();
     this.failureDetector = new FailureDetector(config, dissemination, metric);
-    Vertx vertx = Vertx.vertx();
+    vertx = Vertx.vertx();
     vertx.deployVerticle(failureDetector);
     vertx.deployVerticle(metric);
     Net net = new Net(config);
@@ -41,5 +42,9 @@ public class Gitter {
 
   public String myIpPortString() {
     return failureDetector.myIpPortString();
+  }
+
+  public void stop() {
+    vertx.close();
   }
 }
