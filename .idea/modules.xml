@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/gitter.iml" filepath="$PROJECT_DIR$/.idea/gitter.iml" />
+      <module fileurl="file://$PROJECT_DIR$/entity/gitter-entity.iml" filepath="$PROJECT_DIR$/entity/gitter-entity.iml" />
+      <module fileurl="file://$PROJECT_DIR$/membership/membership.iml" filepath="$PROJECT_DIR$/membership/membership.iml" />
+    </modules>
+  </component>
+</project>
