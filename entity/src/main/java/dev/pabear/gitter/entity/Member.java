@@ -9,7 +9,7 @@ public class Member {
   private int port;
   private int incarnation;
 
-  public String getIpPortString() {
+  public String IpPortString() {
     return getIp() + ":" + getPort();
   }
 }

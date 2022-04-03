@@ -9,4 +9,5 @@ public class ConfigKeys {
   public static final String PING_REQ_MEMBER_COUNT = "PING_REQ_MEMBER_COUNT";
   public static final String PING_REQ_TIMEOUT = "PING_REQ_TIMEOUT";
   public static final String SUSPECT_PERIOD_COUNT = "SUSPECT_PERIOD_COUNT";
+  public static final String PORT = "PORT";
 }

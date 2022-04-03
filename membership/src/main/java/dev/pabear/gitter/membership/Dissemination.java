@@ -23,7 +23,10 @@ public class Dissemination {
     }
   }
 
-  public List<Payload> popPayloadFromSendBox() {
+  public List<Payload> getPayloadFromSendBox() {
+    if (sendBox.size() == 0) {
+      return new ArrayList<>();
+    }
     int count = Math.min(sendBox.size(), payloadCountLimit);
     lastIndex = count;
     return sendBox.subList(0, count - 1);
@@ -43,7 +46,10 @@ public class Dissemination {
     receiveBox.addAll(payloads);
   }
 
-  public List<Payload> getReceived(List<Payload> payloads) {
+  public List<Payload> getReceived() {
+    if (receiveBox.isEmpty()){
+      return new ArrayList<>();
+    }
     return receiveBox.subList(0, receiveBox.size() - 1);
   }
 }

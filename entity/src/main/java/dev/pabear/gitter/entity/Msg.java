@@ -13,11 +13,11 @@ public class Msg {
   private List<Member> members;
   private List<Payload> payloads;
 
-  public String getTargetIpPortString() {
-    return target.getIpPortString();
+  public String targetIpPortString() {
+    return target.IpPortString();
   }
 
-  public String getFromIpPortString() {
-    return from.getIpPortString();
+  public String fromIpPortString() {
+    return from.IpPortString();
   }
 }
