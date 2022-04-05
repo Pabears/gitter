@@ -22,9 +22,16 @@ public class Net extends AbstractVerticle {
   private int port;
   private HttpServer server;
   private WebClient client;
+  private Metric metric;
+  private Double dropMsgRate;
 
-  public Net(Config config) {
+  public Net(Config config, Metric metric) {
     this.port = Integer.parseInt(config.getConfigs().get(ConfigKeys.PORT));
+    String dropRateConfig = config.getConfigs().get(ConfigKeys.DROP_MSG_RATE);
+    if (dropRateConfig != null && !dropRateConfig.isEmpty()) {
+      this.dropMsgRate = Double.valueOf(dropRateConfig);
+    }
+    this.metric = metric;
   }
 
   @Override
@@ -43,17 +50,42 @@ public class Net extends AbstractVerticle {
               JsonObject msg = ctx.getBodyAsJson();
 //              log.info("receive msg: {}", msg);
               receiveMsg(msg.mapTo(Msg.class));
+              ctx.response().send();
+            });
+    router
+        .route("/metric")
+        .handler(
+            ctx -> {
+              ctx.response()
+                  .putHeader("content-type", "application/json")
+                  .send(Json.encode(metric.getMetric()));
             });
 
     server.requestHandler(router).listen(port);
   }
 
   public void sendMsg(Msg msg) {
+    metric.countSendMsg();
     Member member = msg.getTarget();
-    client.post(member.getPort(), member.getIp(), "/c").sendJson(msg);
+    client
+        .post(member.getPort(), member.getIp(), "/c")
+        .sendJson(msg)
+        .onComplete(
+            result -> {
+              if (result.failed()) {
+                log.error("send msg failed! msg: {}.", msg, result.cause());
+              }
+            });
   }
 
   private void receiveMsg(Msg msg) {
+    metric.countReceiveMsg();
+    if (dropMsgRate != null) {
+      if (Math.random() < dropMsgRate) {
+        metric.countDropMsg();
+        return;
+      }
+    }
     eventBus.send(RECEIVE_TOPIC, Json.encode(msg));
   }
 }

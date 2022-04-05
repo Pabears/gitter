@@ -4,9 +4,11 @@ import dev.pabear.gitter.entity.Config;
 import dev.pabear.gitter.entity.Member;
 import dev.pabear.gitter.entity.Payload;
 import io.vertx.core.Vertx;
+import io.vertx.core.VertxOptions;
 import io.vertx.core.json.Json;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -24,7 +26,7 @@ public class Gitter {
     vertx = Vertx.vertx();
     vertx.deployVerticle(failureDetector);
     vertx.deployVerticle(metric);
-    Net net = new Net(config);
+    Net net = new Net(config, metric);
     vertx.deployVerticle(net);
   }
 
@@ -42,6 +44,10 @@ public class Gitter {
 
   public String myIpPortString() {
     return failureDetector.myIpPortString();
+  }
+
+  public Map<String, Integer> getMetric() {
+    return metric.getMetric();
   }
 
   public void stop() {

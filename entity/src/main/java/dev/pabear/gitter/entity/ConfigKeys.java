@@ -10,4 +10,5 @@ public class ConfigKeys {
   public static final String PING_REQ_TIMEOUT = "PING_REQ_TIMEOUT";
   public static final String SUSPECT_PERIOD_COUNT = "SUSPECT_PERIOD_COUNT";
   public static final String PORT = "PORT";
+  public static final String DROP_MSG_RATE = "DROP_MSG_RATE";
 }

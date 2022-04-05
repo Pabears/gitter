@@ -40,6 +40,7 @@ public class FailureDetector extends AbstractVerticle {
   private final Metric metric;
   private AtomicInteger incarnation = new AtomicInteger();
   private AtomicLong periodCount = new AtomicLong();
+  private Member source;
 
   private String myIp = Inet4Address.getLocalHost().getHostAddress();
   private Map<String, Member> ipPortMemberMap = new HashMap<>();
@@ -49,8 +50,7 @@ public class FailureDetector extends AbstractVerticle {
 
   private long periodId;
   private Map<String, Msg> idMsgMap = new HashMap<>();
-  private Map<String, Long> msgIdPingTimerMap = new HashMap<>();
-  private Map<String, Long> msgIdPingReqTimerMap = new HashMap<>();
+  private Map<String, Long> msgIdTimerMap = new HashMap<>();
   private Map<String, Long> ipPortSuspectTimerMap = new HashMap<>();
   private Dissemination dissemination;
 
@@ -68,7 +68,7 @@ public class FailureDetector extends AbstractVerticle {
     this.dissemination = dissemination;
     this.metric = metric;
     if (config.getSource() != null && !config.getSource().ipPortString().equals(myIpPortString())) {
-      ipPortMemberMap.put(config.getSource().ipPortString(), config.getSource());
+      source = config.getSource();
     }
   }
 
@@ -80,12 +80,12 @@ public class FailureDetector extends AbstractVerticle {
             periodId -> {
               this.periodId = periodId;
               clearMemberUpdateForSend();
-              metric.setUpdateMemberCount(ipPortUpdatedMembersForSend.size());
+              metric.setSendUpdateMemberCount(ipPortUpdatedMembersForSend.size());
+              metric.setMemberCount(ipPortMemberMap.size());
               getVertx().eventBus().send(TICK, periodCount.getAndIncrement());
               for (int i = 0; i < pingCount; i++) {
                 Member aPingTarget = getAPingTarget();
-                //                log.info("ping target: {}.", Json.encode(aPingTarget));
-                if (aPingTarget == null) {
+                if (aPingTarget == null || isMe(aPingTarget)) {
                   return;
                 }
                 ping(aPingTarget);
@@ -123,7 +123,7 @@ public class FailureDetector extends AbstractVerticle {
       memberPingOrder.addAll(membersTemp);
     }
     if (memberPingOrder.empty()) {
-      return null;
+      return source;
     }
     return memberPingOrder.pop();
   }
@@ -135,15 +135,19 @@ public class FailureDetector extends AbstractVerticle {
     setPingTimer(id, target);
   }
 
-  private void pingRequest(String originMsgId, Member target) {
+  private void pingRequest(Member target) {
     String id = UUID.randomUUID().toString();
-    Msg pingMsg = buildMsg(MsgType.PING_REQ, id, originMsgId, target);
+
+    Member aPingTarget = getAPingTarget();
+    if (aPingTarget == null) {
+      return;
+    }
+    Msg pingMsg = buildMsg(MsgType.PING_REQ, id, null, aPingTarget);
     sendMsg(pingMsg);
     setPingRequestTimer(id, target);
   }
 
   private void onPing(Msg msg) {
-    updateMember(msg.getFrom());
     sendMsg(buildMsg(MsgType.ACK, msg.getId(), null, msg.getFrom()));
   }
 
@@ -155,17 +159,14 @@ public class FailureDetector extends AbstractVerticle {
   }
 
   private void onAck(Msg msg) {
-    clearPingTimer(msg.getId());
-    setMemberAliveByIpPort(msg.fromIpPortString());
+    clearTimerByMsgId(msg.getId());
 
     Msg originMsg = idMsgMap.get(msg.getId());
-    setMemberAliveByIpPort(originMsg.targetIpPortString());
-
-    if (originMsg.getType() == MsgType.PING_REQ) {
-      // from me
-      clearPingRequestTimer(msg.getPingReqId());
-    } else if (originMsg.getPingReqId() != null) {
-      sendMsg(buildMsg(MsgType.ACK, originMsg.getPingReqId(), null, originMsg.getFrom()));
+    if (originMsg != null && originMsg.getType() == MsgType.PING_REQ) {
+      Msg originPingReq = idMsgMap.get(originMsg.getPingReqId());
+      sendMsg(
+          buildMsg(
+              MsgType.ACK, originMsg.getId(), originMsg.getPingReqId(), originPingReq.getFrom()));
     }
   }
 
@@ -175,7 +176,8 @@ public class FailureDetector extends AbstractVerticle {
     msg.setTarget(target);
     msg.setId(id);
     msg.setPayloads(new ArrayList<>(dissemination.getPayloadFromSendBox()));
-    msg.setMembers(new ArrayList<>(ipPortUpdatedMembersForSend.values()));
+    //todo first time to join, get a lot of member, than, get news.
+    msg.setMembers(new ArrayList<>(ipPortMemberMap.values()));
     msg.setPingReqId(originId);
     Member member = new Member();
     member.setIp(myIp);
@@ -187,6 +189,7 @@ public class FailureDetector extends AbstractVerticle {
   }
 
   public void processMsgInfo(Msg msg) {
+    setMemberAlive(msg.getFrom());
     processMembers(msg.getMembers());
     processPayloads(msg.getPayloads());
   }
@@ -208,20 +211,20 @@ public class FailureDetector extends AbstractVerticle {
             pingTimeout,
             timerId -> {
               for (int i = 0; i < Math.min(pingReqMemberCount, ipPortMemberMap.size()); i++) {
-                pingRequest(msgId, target);
+                log.info("ping timeout, msg: {} , send pingReq.", Json.encode(idMsgMap.get(msgId)));
+                pingRequest(target);
               }
             });
 
-    msgIdPingTimerMap.put(msgId, tid);
+    msgIdTimerMap.put(msgId, tid);
   }
 
-  private void clearPingTimer(String msgId) {
-    Long tid = msgIdPingTimerMap.get(msgId);
-    if (tid == null) {
-      return;
+  private void clearTimerByMsgId(String msgId) {
+    Long tid = msgIdTimerMap.get(msgId);
+    if (tid == null || !getVertx().cancelTimer(tid)) {
+      log.error("clear timer failed! msgId: {}.", msgId);
     }
-    getVertx().cancelTimer(tid);
-    msgIdPingTimerMap.remove(msgId);
+    msgIdTimerMap.remove(msgId);
   }
 
   private void setPingRequestTimer(String msgId, Member target) {
@@ -239,14 +242,7 @@ public class FailureDetector extends AbstractVerticle {
               updateMember(member);
             });
 
-    msgIdPingReqTimerMap.put(msgId, tid);
-  }
-
-  private void clearPingRequestTimer(String msgId) {
-    Long tid = msgIdPingReqTimerMap.get(msgId);
-    if (tid == null) return;
-    getVertx().cancelTimer(tid);
-    msgIdPingReqTimerMap.remove(msgId);
+    msgIdTimerMap.put(msgId, tid);
   }
 
   private void setSuspectTimer(String memberIpPort) {
@@ -265,16 +261,15 @@ public class FailureDetector extends AbstractVerticle {
     ipPortSuspectTimerMap.put(memberIpPort, tid);
   }
 
-  private void setMemberAliveByIpPort(String ipPort) {
-    Member member = ipPortMemberMap.get(ipPort);
-    if (member == null || member.getStatus() == MemberStatus.ALIVE) return;
+  private void setMemberAlive(Member member) {
     member.setStatus(MemberStatus.ALIVE);
     updateMember(member);
   }
 
   private void updateMember(Member member) {
     if (isMe(member)) {
-      if (member.getStatus() != MemberStatus.ALIVE || member.getIncarnation() < incarnation.get()) {
+      if (member.getStatus() != MemberStatus.ALIVE
+          && member.getIncarnation() >= incarnation.get()) {
         Member me = new Member();
         me.setPort(port);
         me.setIp(myIp);
@@ -288,14 +283,10 @@ public class FailureDetector extends AbstractVerticle {
     Member localData = ipPortMemberMap.get(member.ipPortString());
     Member comparedMember = compareMember(member, localData);
     ipPortUpdatedMembers.put(comparedMember.ipPortString(), comparedMember);
-    if (comparedMember != localData) {
-      if (member.getStatus() != MemberStatus.FAULTY) {
-        ipPortMemberMap.put(member.ipPortString(), member);
-      }
+    if (comparedMember == localData && comparedMember.getStatus() == MemberStatus.FAULTY) {
+      ipPortMemberMap.remove(localData.ipPortString());
     } else {
-      if (comparedMember.getStatus() == MemberStatus.FAULTY) {
-        ipPortMemberMap.remove(localData.ipPortString());
-      }
+      ipPortMemberMap.put(member.ipPortString(), member);
     }
   }
 
@@ -331,13 +322,22 @@ public class FailureDetector extends AbstractVerticle {
   }
 
   private void sendMsg(Msg msg) {
-    metric.countSendMsg();
-    idMsgMap.put(msg.getId(), msg);
+    //    log.info("send msg: {}", msg);
+    if (msg.getType() != MsgType.ACK) {
+      idMsgMap.put(msg.getId(), msg);
+    } else {
+      idMsgMap.remove(msg.getId());
+    }
     getVertx().eventBus().send(SEND_TOPIC, Json.encode(msg));
   }
 
   private void processMsg(Msg msg) {
-    metric.countReceiveMsg();
+    if (msg.getType() != MsgType.ACK) {
+      idMsgMap.put(msg.getId(), msg);
+    } else {
+      idMsgMap.remove(msg.getId());
+    }
+
     processMsgInfo(msg);
     if (msg.getType() == MsgType.PING) {
       onPing(msg);
