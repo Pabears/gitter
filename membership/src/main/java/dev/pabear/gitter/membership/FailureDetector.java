@@ -211,7 +211,7 @@ public class FailureDetector extends AbstractVerticle {
             pingTimeout,
             timerId -> {
               for (int i = 0; i < Math.min(pingReqMemberCount, ipPortMemberMap.size()); i++) {
-                log.info("ping timeout, msg: {} , send pingReq.", Json.encode(idMsgMap.get(msgId)));
+//                log.info("ping timeout, msg: {} , send pingReq.", Json.encode(idMsgMap.get(msgId)));
                 pingRequest(target);
               }
             });
