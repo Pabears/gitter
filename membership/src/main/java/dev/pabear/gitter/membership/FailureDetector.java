@@ -135,12 +135,6 @@ public class FailureDetector extends AbstractVerticle {
     return msg;
   }
 
-  public void processMsgInfo(Msg msg) {
-    setMemberAlive(msg.getFrom());
-    processMembers(msg.getMembers());
-    processPayloads(msg.getPayloads());
-  }
-
   private void processMembers(List<Member> members) {
 
     for (Member member : members) {
@@ -149,7 +143,10 @@ public class FailureDetector extends AbstractVerticle {
   }
 
   private void processPayloads(List<Payload> payloads) {
-    dissemination.addAllToReceiveBox(payloads);
+    for (Payload p : payloads) {
+      metric.countReceivePayload();
+      dissemination.addAllToReceiveBox(payloads);
+    }
   }
 
   private void setPingTimer(String msgId, Member target) {
@@ -227,7 +224,9 @@ public class FailureDetector extends AbstractVerticle {
       idMsgMap.remove(msg.getId());
     }
 
-    processMsgInfo(msg);
+    setMemberAlive(msg.getFrom());
+    processMembers(msg.getMembers());
+    processPayloads(msg.getPayloads());
     if (msg.getType() == MsgType.PING) {
       onPing(msg);
     } else if (msg.getType() == MsgType.ACK) {

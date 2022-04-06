@@ -46,7 +46,7 @@ public class Membership extends AbstractVerticle {
   }
 
   public String myIpPortString() {
-    return this.myIp + ":" + port;
+    return getMe().ipPortString();
   }
 
   public Member getAPingTarget() {

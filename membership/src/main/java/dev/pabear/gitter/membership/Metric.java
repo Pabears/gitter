@@ -19,6 +19,7 @@ public class Metric extends AbstractVerticle {
   private final AtomicInteger sendUpdateMemberCount = new AtomicInteger();
   private final AtomicInteger receiveMemberUpdateCount = new AtomicInteger();
   private final AtomicInteger memberCount = new AtomicInteger();
+  private final AtomicInteger receivePayloadCount = new AtomicInteger();
 
   public void countReceiveMsg() {
     this.receiveMsgCount.getAndIncrement();
@@ -30,6 +31,10 @@ public class Metric extends AbstractVerticle {
 
   public void countSendMsg() {
     this.sendMsgCount.getAndIncrement();
+  }
+
+  public void countReceivePayload() {
+    this.receivePayloadCount.getAndIncrement();
   }
 
   public void setSendUpdateMemberCount(int count) {
@@ -61,6 +66,7 @@ public class Metric extends AbstractVerticle {
               metrics.put("sc", sendMsgCount.getAndSet(0));
               metrics.put("dc", dropMsgCount.getAndSet(0));
               metrics.put("mc", memberCount.getAndSet(0));
+              metrics.put("rpc", receivePayloadCount.getAndSet(0));
               metrics.put("rmuc", receiveMemberUpdateCount.getAndSet(0));
               metrics.put("smuc", sendUpdateMemberCount.getAndSet(0));
               if (metricQueue.size() > 100) {
