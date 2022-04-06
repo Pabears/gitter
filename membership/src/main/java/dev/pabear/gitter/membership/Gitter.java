@@ -4,7 +4,6 @@ import dev.pabear.gitter.entity.Config;
 import dev.pabear.gitter.entity.Member;
 import dev.pabear.gitter.entity.Payload;
 import io.vertx.core.Vertx;
-import io.vertx.core.VertxOptions;
 import io.vertx.core.json.Json;
 import java.net.UnknownHostException;
 import java.util.List;
@@ -15,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 public class Gitter {
   private Dissemination dissemination;
   private FailureDetector failureDetector;
+  private Membership membership;
   private Metric metric;
   private Vertx vertx;
 
@@ -22,7 +22,8 @@ public class Gitter {
     log.info("start config: {}", Json.encode(config));
     this.dissemination = new Dissemination(config);
     this.metric = new Metric();
-    this.failureDetector = new FailureDetector(config, dissemination, metric);
+    this.membership = new Membership(config, metric);
+    this.failureDetector = new FailureDetector(config, dissemination, metric, membership);
     vertx = Vertx.vertx();
     vertx.deployVerticle(failureDetector);
     vertx.deployVerticle(metric);
@@ -31,7 +32,7 @@ public class Gitter {
   }
 
   public List<Member> getMembers() {
-    return failureDetector.getMembers();
+    return membership.getMembers();
   }
 
   public void sendPayload(Payload payload) {
@@ -43,7 +44,7 @@ public class Gitter {
   }
 
   public String myIpPortString() {
-    return failureDetector.myIpPortString();
+    return membership.myIpPortString();
   }
 
   public Map<String, Integer> getMetric() {
